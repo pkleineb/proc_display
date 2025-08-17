@@ -6,6 +6,22 @@ use syn::{
     DeriveInput, Error, Fields, FieldsNamed, FieldsUnnamed, LitStr, Meta,
 };
 
+macro_rules! enforce_correct_display_use {
+    ($fields:expr) => {
+        for field in $fields {
+            for attr in &field.attrs {
+                if attr.path().is_ident("display") {
+                    let error = Error::new(
+                        attr.span(),
+                        "The #[display] attribute cannot be used on struct fields",
+                    );
+                    return error.to_compile_error();
+                }
+            }
+        }
+    };
+}
+
 #[proc_macro_derive(Display, attributes(display))]
 pub fn display(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
@@ -76,7 +92,9 @@ fn parse_struct(_struct_data: &DataStruct) -> TokenStream2 {
 }
 
 fn parse_named_fields(fields: &FieldsNamed, message: &str) -> TokenStream2 {
+    enforce_correct_display_use!(&fields.named);
 fn parse_unnamed_fields(fields: &FieldsUnnamed) -> TokenStream2 {
+    enforce_correct_display_use!(&fields.unnamed);
     quote! {}
 }
 
