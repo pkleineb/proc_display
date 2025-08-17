@@ -37,7 +37,57 @@ fn parse_union(_union_data: &DataUnion) -> TokenStream2 {
 }
 
 fn parse_enum(enum_data: &DataEnum) -> TokenStream2 {
+    let branches: TokenStream2 = enum_data
+        .variants
+        .iter()
+        .map(|variant| {
+            let variant_name = &variant.ident;
+            let message = variant
+                .attrs
+                .iter()
+                .find(|attr| attr.path().is_ident("display"))
+                .and_then(get_message_from_attribute)
+                .unwrap_or("".to_string());
+
+            match &variant.fields {
+                Fields::Unit => {
+                    quote! {
+                        Self::#variant_name => write!(f, "{}", #message),
+                    }
+                }
+                Fields::Named(fields) => {
+                    quote! {
+                    }
+                }
+                Fields::Unnamed(fields) => parse_unnamed_fields(fields),
+            }
+        })
+        .collect();
+
+    quote! {
+        match self {
+            #branches
+        }
+    }
+}
+
 fn parse_struct(_struct_data: &DataStruct) -> TokenStream2 {
     quote! {}
 }
 
+fn parse_named_fields(fields: &FieldsNamed, message: &str) -> TokenStream2 {
+fn parse_unnamed_fields(fields: &FieldsUnnamed) -> TokenStream2 {
+    quote! {}
+}
+
+fn get_message_from_attribute(attr: &Attribute) -> Option<String> {
+    if let Meta::List(meta_list) = &attr.meta {
+        if let Ok(message) = meta_list.parse_args::<LitStr>() {
+            return Some(message.value());
+        }
+    }
+
+    None
+}
+
+}
