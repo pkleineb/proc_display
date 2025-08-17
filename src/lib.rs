@@ -72,7 +72,18 @@ fn parse_enum(enum_data: &DataEnum) -> TokenStream2 {
                     }
                 }
                 Fields::Named(fields) => {
+                    let write_call = parse_named_fields(fields, &message);
+                    let field_destructuring: TokenStream2 = fields
+                        .named
+                        .iter()
+                        .map(|field| {
+                            let field_ident = &field.ident;
+                            quote! { #field_ident, }
+                        })
+                        .collect();
+
                     quote! {
+                        Self::#variant_name {#field_destructuring ..} => #write_call,
                     }
                 }
                 Fields::Unnamed(fields) => parse_unnamed_fields(fields),
@@ -93,6 +104,21 @@ fn parse_struct(_struct_data: &DataStruct) -> TokenStream2 {
 
 fn parse_named_fields(fields: &FieldsNamed, message: &str) -> TokenStream2 {
     enforce_correct_display_use!(&fields.named);
+
+    let arguments: TokenStream2 = fields
+        .named
+        .iter()
+        .map(|field| {
+            let field_ident = &field.ident;
+            quote! { #field_ident = #field_ident }
+        })
+        .collect();
+
+    quote! {
+        write!(f, #message, #arguments)
+    }
+}
+
 fn parse_unnamed_fields(fields: &FieldsUnnamed) -> TokenStream2 {
     enforce_correct_display_use!(&fields.unnamed);
     quote! {}
