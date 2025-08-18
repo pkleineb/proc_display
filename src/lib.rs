@@ -124,9 +124,66 @@ fn parse_struct(_struct_data: &DataStruct) -> TokenStream2 {
 
 fn parse_named_fields(fields: &FieldsNamed, message: &str) -> TokenStream2 {
     enforce_correct_display_use!(&fields.named);
+fn placeholders_are_valid_fields(
+    fields: &Fields,
+    mut placeholders: Vec<&str>,
+) -> Result<(), TokenStream2> {
+    match fields {
+        Fields::Unit => {
+            if !placeholders.is_empty() {
+                return Err(
+                    Error::new(
+                        fields.span(),
+                        "#[display(...)] doesn't expect any placeholder variabels on a unit struct since there are no attributes."
+                    ).to_compile_error()
+                );
+            }
+        }
+        Fields::Named(named_fields) => {
+            for field in &named_fields.named {
+                if let Some(position) = placeholders.iter().position(|placeholder| {
+                    let field_ident = &field
+                        .ident
+                        .as_ref()
+                        .expect("Expected field to be named when iterating over named fields.");
+                    *placeholder == field_ident.to_string().as_str()
+                }) {
+                    placeholders.remove(position);
+                }
+            }
 
     let arguments: TokenStream2 = fields
         .named
+            if !placeholders.is_empty() {
+                return Err(Error::new(
+                    fields.span(),
+                    format!(
+                        "#[display(...)] found undeclared fields ({}) in display message.",
+                        placeholders.join(", ")
+                    ),
+                )
+                .to_compile_error());
+            }
+        }
+        Fields::Unnamed(unnamed_fields) => {
+            if unnamed_fields.unnamed.len() < placeholders.len() {
+                return Err(
+                    Error::new(
+                        fields.span(),
+                        format!(
+                            "#[display(...)] expected {} positional arguments, but only {} are defined on the Tuple struct",
+                            placeholders.len(),
+                            unnamed_fields.unnamed.len()
+                        )
+                    ).to_compile_error()
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
         .iter()
         .map(|field| {
             let field_ident = &field.ident;
