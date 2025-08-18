@@ -92,7 +92,8 @@ fn parse_enum(enum_data: &DataEnum) -> TokenStream2 {
                     }
                 }
                 Fields::Named(fields) => {
-                    let write_call = parse_named_fields(fields, &message);
+                    enforce_correct_display_use!(&fields.named);
+                    let write_call = parse_named_fields(&message, message_placeholders);
                     let field_destructuring: TokenStream2 = fields
                         .named
                         .iter()
@@ -122,8 +123,6 @@ fn parse_struct(_struct_data: &DataStruct) -> TokenStream2 {
     quote! {}
 }
 
-fn parse_named_fields(fields: &FieldsNamed, message: &str) -> TokenStream2 {
-    enforce_correct_display_use!(&fields.named);
 fn placeholders_are_valid_fields(
     fields: &Fields,
     mut placeholders: Vec<&str>,
@@ -152,8 +151,6 @@ fn placeholders_are_valid_fields(
                 }
             }
 
-    let arguments: TokenStream2 = fields
-        .named
             if !placeholders.is_empty() {
                 return Err(Error::new(
                     fields.span(),
@@ -184,9 +181,11 @@ fn placeholders_are_valid_fields(
     Ok(())
 }
 
+fn parse_named_fields(message: &str, placeholders_to_use: Vec<String>) -> TokenStream2 {
+    let arguments: TokenStream2 = placeholders_to_use
         .iter()
         .map(|field| {
-            let field_ident = &field.ident;
+            let field_ident = Ident::new(field, proc_macro2::Span::call_site());
             quote! { #field_ident = #field_ident, }
         })
         .collect();
