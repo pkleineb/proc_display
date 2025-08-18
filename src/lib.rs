@@ -246,3 +246,44 @@ fn parse_message(message: &str) -> Result<Vec<String>, ParseError> {
     Ok(result.into_iter().collect::<Vec<_>>())
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_one_argument_message_parse() {
+        let str = "One {parse} message.";
+        assert_eq!(parse_message(str), Ok(vec!["parse".to_string()]));
+    }
+
+    #[test]
+    fn valid_multiple_argument_message_parse() {
+        let str = "{Multiple} parseable {Se}quen{zes}.";
+        assert_eq!(
+            parse_message(str),
+            Ok(vec![
+                "Multiple".to_string(),
+                "Se".to_string(),
+                "zes".to_string()
+            ])
+        );
+    }
+
+    #[test]
+    fn valid_number_argument_message_parse() {
+        let str = "This should also parse {0}.";
+        assert_eq!(parse_message(str), Ok(vec!["0".to_string()]));
+    }
+
+    #[test]
+    fn invalid_argument_message_parse() {
+        let str = "{{}";
+        assert_eq!(parse_message(str), Err(ParseError));
+        let str = "{}}";
+        assert_eq!(parse_message(str), Err(ParseError));
+        let str = "{-}";
+        assert_eq!(parse_message(str), Err(ParseError));
+        let str = "{\\}";
+        assert_eq!(parse_message(str), Err(ParseError));
+    }
+}
