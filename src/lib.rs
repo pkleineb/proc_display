@@ -63,12 +63,27 @@ fn parse_enum(enum_data: &DataEnum) -> TokenStream2 {
         .iter()
         .map(|variant| {
             let variant_name = &variant.ident;
+            let mut attr_span = variant.span();
             let message = variant
                 .attrs
                 .iter()
                 .find(|attr| attr.path().is_ident("display"))
-                .and_then(get_message_from_attribute)
+                .and_then(|attr| {
+                    attr_span = attr.span();
+                    get_message_from_attribute(attr)
+                })
                 .unwrap_or("".to_string());
+
+            let Ok(message_placeholders) = parse_message(&message) else {
+                return Error::new(
+                    attr_span,
+                    format!("The display message for {variant_name} could not be parsed correctly. Make sure that all placeholders refering to attributes are valid rust attributes."),
+                ).to_compile_error();
+            };
+
+            if let Err(error_message) = placeholders_are_valid_fields(&variant.fields, message_placeholders.iter().map(|str| str.as_str()).collect::<Vec<_>>()) {
+                return error_message;
+            }
 
             match &variant.fields {
                 Fields::Unit => {
