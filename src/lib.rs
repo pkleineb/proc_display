@@ -1,9 +1,11 @@
+use std::collections::HashSet;
+
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::{
     parse_macro_input, spanned::Spanned, Attribute, Data, DataEnum, DataStruct, DataUnion,
-    DeriveInput, Error, Fields, FieldsNamed, FieldsUnnamed, LitStr, Meta,
+    DeriveInput, Error, Fields, FieldsNamed, FieldsUnnamed, Ident, LitStr, Meta,
 };
 
 macro_rules! enforce_correct_display_use {
@@ -21,6 +23,9 @@ macro_rules! enforce_correct_display_use {
         }
     };
 }
+
+#[derive(Debug, PartialEq)]
+struct ParseError;
 
 #[proc_macro_derive(Display, attributes(display))]
 pub fn display(input: TokenStream) -> TokenStream {
@@ -134,4 +139,38 @@ fn get_message_from_attribute(attr: &Attribute) -> Option<String> {
     None
 }
 
+fn parse_message(message: &str) -> Result<Vec<String>, ParseError> {
+    let mut chars = message.chars().peekable();
+    let mut result = HashSet::new();
+    let mut placeholder = "".to_string();
+
+    while let Some(next_char) = chars.next() {
+        if next_char == '{' {
+            if chars.peek() == Some(&'{') {
+                chars.next();
+                continue;
+            } else {
+                placeholder.clear();
+                while let Some(collectible_char) = chars.next() {
+                    if collectible_char == '}' && chars.peek() != Some(&'}') {
+                        result.insert(placeholder.clone());
+                        placeholder.clear();
+                        break;
+                    }
+
+                    if !collectible_char.is_alphanumeric() && collectible_char != '_' {
+                        return Err(ParseError);
+                    }
+
+                    placeholder.push(collectible_char);
+                }
+            }
+        }
+        if next_char == '}' {
+            return Err(ParseError);
+        }
+    }
+
+    Ok(result.into_iter().collect::<Vec<_>>())
 }
+
