@@ -110,7 +110,7 @@ fn parse_named_fields(fields: &FieldsNamed, message: &str) -> TokenStream2 {
         .iter()
         .map(|field| {
             let field_ident = &field.ident;
-            quote! { #field_ident = #field_ident }
+            quote! { #field_ident = #field_ident, }
         })
         .collect();
 
