@@ -107,7 +107,24 @@ fn parse_enum(enum_data: &DataEnum) -> TokenStream2 {
                         Self::#variant_name {#field_destructuring ..} => #write_call,
                     }
                 }
-                Fields::Unnamed(fields) => parse_unnamed_fields(fields),
+                Fields::Unnamed(fields) => {
+                    enforce_correct_display_use!(&fields.unnamed);
+                    let write_call = parse_unnamed_fields(&message, message_placeholders);
+                    let field_destructuring: TokenStream2 = fields
+                        .unnamed
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| {
+                            let field_name = format!("field_{i}");
+                            let field_ident =
+                                Ident::new(&field_name, proc_macro2::Span::call_site());
+                            quote! { #field_ident, }
+                        })
+                        .collect();
+                    quote! {
+                        Self::#variant_name (#field_destructuring ..) => #write_call,
+                    }
+                }
             }
         })
         .collect();
@@ -195,9 +212,21 @@ fn parse_named_fields(message: &str, placeholders_to_use: Vec<String>) -> TokenS
     }
 }
 
-fn parse_unnamed_fields(fields: &FieldsUnnamed) -> TokenStream2 {
-    enforce_correct_display_use!(&fields.unnamed);
-    quote! {}
+fn parse_unnamed_fields(message: &str, mut placeholders_to_use: Vec<String>) -> TokenStream2 {
+    placeholders_to_use.sort();
+
+    let arguments: TokenStream2 = placeholders_to_use
+        .iter()
+        .map(|i| {
+            let field_name = format!("field_{i}");
+            let field_ident = Ident::new(&field_name, proc_macro2::Span::call_site());
+            quote! { #field_ident, }
+        })
+        .collect();
+
+    quote! {
+        write!(f, #message, #arguments)
+    }
 }
 
 fn get_message_from_attribute(attr: &Attribute) -> Option<String> {
