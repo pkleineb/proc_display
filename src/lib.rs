@@ -224,6 +224,10 @@ fn parse_unnamed_fields(mut message: String, mut placeholders_to_use: Vec<String
         })
         .collect();
 
+    for (i, placeholder) in placeholders_to_use.iter().enumerate() {
+        message = message.replace(placeholder, i.to_string().as_str());
+    }
+
     quote! {
         write!(f, #message, #arguments)
     }
