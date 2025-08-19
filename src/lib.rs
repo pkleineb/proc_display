@@ -93,7 +93,7 @@ fn parse_enum(enum_data: &DataEnum) -> TokenStream2 {
                 }
                 Fields::Named(fields) => {
                     enforce_correct_display_use!(&fields.named);
-                    let write_call = parse_named_fields(&message, message_placeholders);
+                    let write_call = parse_named_fields(message, message_placeholders);
                     let field_destructuring: TokenStream2 = fields
                         .named
                         .iter()
@@ -109,7 +109,7 @@ fn parse_enum(enum_data: &DataEnum) -> TokenStream2 {
                 }
                 Fields::Unnamed(fields) => {
                     enforce_correct_display_use!(&fields.unnamed);
-                    let write_call = parse_unnamed_fields(&message, message_placeholders);
+                    let write_call = parse_unnamed_fields(message, message_placeholders);
                     let field_destructuring: TokenStream2 = fields
                         .unnamed
                         .iter()
@@ -198,7 +198,7 @@ fn placeholders_are_valid_fields(
     Ok(())
 }
 
-fn parse_named_fields(message: &str, placeholders_to_use: Vec<String>) -> TokenStream2 {
+fn parse_named_fields(message: String, placeholders_to_use: Vec<String>) -> TokenStream2 {
     let arguments: TokenStream2 = placeholders_to_use
         .iter()
         .map(|field| {
@@ -212,7 +212,7 @@ fn parse_named_fields(message: &str, placeholders_to_use: Vec<String>) -> TokenS
     }
 }
 
-fn parse_unnamed_fields(message: &str, mut placeholders_to_use: Vec<String>) -> TokenStream2 {
+fn parse_unnamed_fields(mut message: String, mut placeholders_to_use: Vec<String>) -> TokenStream2 {
     placeholders_to_use.sort();
 
     let arguments: TokenStream2 = placeholders_to_use
