@@ -1,11 +1,9 @@
-use std::collections::HashSet;
-
 use proc_macro::TokenStream;
-use proc_macro2::TokenStream as TokenStream2;
+use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::quote;
 use syn::{
-    parse_macro_input, spanned::Spanned, Attribute, Data, DataEnum, DataStruct, DataUnion,
-    DeriveInput, Error, Fields, FieldsNamed, FieldsUnnamed, Ident, LitStr, Meta,
+    parse_macro_input, spanned::Spanned, Attribute, Data, DataEnum, DataUnion, DeriveInput, Error,
+    Fields, Ident, Index, LitStr, Meta,
 };
 
 macro_rules! enforce_correct_display_use {
@@ -72,16 +70,16 @@ fn parse_enum(enum_data: &DataEnum) -> TokenStream2 {
                     attr_span = attr.span();
                     get_message_from_attribute(attr)
                 })
-                .unwrap_or("".to_string());
+                .unwrap_or_default();
 
-            let Ok(message_placeholders) = parse_message(&message) else {
+            let Ok(message_format_arguments) = parse_message(&message) else {
                 return Error::new(
                     attr_span,
-                    format!("The display message for {variant_name} could not be parsed correctly. Make sure that all placeholders refering to attributes are valid rust attributes."),
+                    format!("The display message for {variant_name} could not be parsed correctly. Make sure that all format arguments refering to attributes are valid rust attributes."),
                 ).to_compile_error();
             };
 
-            if let Err(error_message) = placeholders_are_valid_fields(&variant.fields, message_placeholders.iter().map(|str| str.as_str()).collect::<Vec<_>>()) {
+            if let Err(error_message) = format_arguments_are_valid_fields(&variant.fields, message_format_arguments.iter().map(|str| str.as_str()).collect::<Vec<_>>()) {
                 return error_message;
             }
 
@@ -93,7 +91,7 @@ fn parse_enum(enum_data: &DataEnum) -> TokenStream2 {
                 }
                 Fields::Named(fields) => {
                     enforce_correct_display_use!(&fields.named);
-                    let write_call = parse_named_fields(message, message_placeholders);
+                    let write_call = parse_named_fields(message, message_format_arguments);
                     let field_destructuring: TokenStream2 = fields
                         .named
                         .iter()
@@ -109,7 +107,7 @@ fn parse_enum(enum_data: &DataEnum) -> TokenStream2 {
                 }
                 Fields::Unnamed(fields) => {
                     enforce_correct_display_use!(&fields.unnamed);
-                    let write_call = parse_unnamed_fields(message, message_placeholders);
+                    let write_call = parse_unnamed_fields(message, message_format_arguments);
                     let field_destructuring: TokenStream2 = fields
                         .unnamed
                         .iter()
@@ -140,53 +138,53 @@ fn parse_struct(_struct_data: &DataStruct) -> TokenStream2 {
     quote! {}
 }
 
-fn placeholders_are_valid_fields(
+fn format_arguments_are_valid_fields(
     fields: &Fields,
-    mut placeholders: Vec<&str>,
+    mut format_arguments: Vec<&str>,
 ) -> Result<(), TokenStream2> {
     match fields {
         Fields::Unit => {
-            if !placeholders.is_empty() {
+            if !format_arguments.is_empty() {
                 return Err(
                     Error::new(
                         fields.span(),
-                        "#[display(...)] doesn't expect any placeholder variabels on a unit struct since there are no attributes."
+                        "#[display(...)] doesn't expect any format argument variabels on a unit struct since there are no attributes."
                     ).to_compile_error()
                 );
             }
         }
         Fields::Named(named_fields) => {
             for field in &named_fields.named {
-                if let Some(position) = placeholders.iter().position(|placeholder| {
+                if let Some(position) = format_arguments.iter().position(|format_argument| {
                     let field_ident = &field
                         .ident
                         .as_ref()
                         .expect("Expected field to be named when iterating over named fields.");
-                    *placeholder == field_ident.to_string().as_str()
+                    *format_argument == field_ident.to_string().as_str()
                 }) {
-                    placeholders.remove(position);
+                    format_arguments.remove(position);
                 }
             }
 
-            if !placeholders.is_empty() {
+            if !format_arguments.is_empty() {
                 return Err(Error::new(
                     fields.span(),
                     format!(
                         "#[display(...)] found undeclared fields ({}) in display message.",
-                        placeholders.join(", ")
+                        format_arguments.join(", ")
                     ),
                 )
                 .to_compile_error());
             }
         }
         Fields::Unnamed(unnamed_fields) => {
-            if unnamed_fields.unnamed.len() < placeholders.len() {
+            if unnamed_fields.unnamed.len() < format_arguments.len() {
                 return Err(
                     Error::new(
                         fields.span(),
                         format!(
                             "#[display(...)] expected {} positional arguments, but only {} are defined on the Tuple struct",
-                            placeholders.len(),
+                            format_arguments.len(),
                             unnamed_fields.unnamed.len()
                         )
                     ).to_compile_error()
@@ -198,8 +196,8 @@ fn placeholders_are_valid_fields(
     Ok(())
 }
 
-fn parse_named_fields(message: String, placeholders_to_use: Vec<String>) -> TokenStream2 {
-    let arguments: TokenStream2 = placeholders_to_use
+fn parse_named_fields(message: String, format_arguments_to_use: Vec<String>) -> TokenStream2 {
+    let arguments: TokenStream2 = format_arguments_to_use
         .iter()
         .map(|field| {
             let field_ident = Ident::new(field, proc_macro2::Span::call_site());
@@ -212,10 +210,13 @@ fn parse_named_fields(message: String, placeholders_to_use: Vec<String>) -> Toke
     }
 }
 
-fn parse_unnamed_fields(mut message: String, mut placeholders_to_use: Vec<String>) -> TokenStream2 {
-    placeholders_to_use.sort();
+fn parse_unnamed_fields(
+    mut message: String,
+    mut format_arguments_to_use: Vec<String>,
+) -> TokenStream2 {
+    format_arguments_to_use.sort();
 
-    let arguments: TokenStream2 = placeholders_to_use
+    let arguments: TokenStream2 = format_arguments_to_use
         .iter()
         .map(|i| {
             let field_name = format!("field_{i}");
@@ -224,8 +225,8 @@ fn parse_unnamed_fields(mut message: String, mut placeholders_to_use: Vec<String
         })
         .collect();
 
-    for (i, placeholder) in placeholders_to_use.iter().enumerate() {
-        message = message.replace(placeholder, i.to_string().as_str());
+    for (i, format_argument) in format_arguments_to_use.iter().enumerate() {
+        message = message.replace(format_argument, i.to_string().as_str());
     }
 
     quote! {
@@ -245,8 +246,8 @@ fn get_message_from_attribute(attr: &Attribute) -> Option<String> {
 
 fn parse_message(message: &str) -> Result<Vec<String>, ParseError> {
     let mut chars = message.chars().peekable();
-    let mut result = HashSet::new();
-    let mut placeholder = "".to_string();
+    let mut result = vec![];
+    let mut format_argument = String::new();
 
     while let Some(next_char) = chars.next() {
         if next_char == '{' {
@@ -254,11 +255,14 @@ fn parse_message(message: &str) -> Result<Vec<String>, ParseError> {
                 chars.next();
                 continue;
             } else {
-                placeholder.clear();
+                format_argument.clear();
                 while let Some(collectible_char) = chars.next() {
                     if collectible_char == '}' && chars.peek() != Some(&'}') {
-                        result.insert(placeholder.clone());
-                        placeholder.clear();
+                        if !result.contains(&format_argument) {
+                            result.push(format_argument.clone());
+                        }
+
+                        format_argument.clear();
                         break;
                     }
 
@@ -266,7 +270,7 @@ fn parse_message(message: &str) -> Result<Vec<String>, ParseError> {
                         return Err(ParseError);
                     }
 
-                    placeholder.push(collectible_char);
+                    format_argument.push(collectible_char);
                 }
             }
         }
@@ -275,7 +279,7 @@ fn parse_message(message: &str) -> Result<Vec<String>, ParseError> {
         }
     }
 
-    Ok(result.into_iter().collect::<Vec<_>>())
+    Ok(result)
 }
 
 #[cfg(test)]
