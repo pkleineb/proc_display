@@ -77,19 +77,14 @@ fn impl_display(ast: &syn::DeriveInput) -> TokenStream {
     };
 
     match generated {
-        Ok(generated) => {
-            let result = quote! {
-                impl std::fmt::Display for #ident {
-                    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                        #generated
-                    }
+        Ok(generated) => quote! {
+            impl std::fmt::Display for #ident {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    #generated
                 }
-            };
-
-            println!("Generated Code: {}", result);
-
-            result.into()
+            }
         }
+        .into(),
         Err(error_token_stream) => error_token_stream.to_compile_error().into(),
     }
 }
