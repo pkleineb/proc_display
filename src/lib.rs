@@ -2,8 +2,8 @@ use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{quote, TokenStreamExt};
 use syn::{
-    parse_macro_input, spanned::Spanned, Attribute, Data, DataEnum, DataUnion, DeriveInput, Error,
-    Fields, Ident, Index, LitStr, Meta,
+    parse_macro_input, spanned::Spanned, Attribute, Data, DataEnum, DeriveInput, Error, Fields,
+    Ident, Index, LitStr, Meta,
 };
 
 macro_rules! enforce_correct_display_use {
