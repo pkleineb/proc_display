@@ -25,6 +25,18 @@ macro_rules! enforce_correct_display_use {
 #[derive(Debug, PartialEq)]
 struct ParseError;
 
+#[derive(Debug)]
+struct Intervall {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl Intervall {
+    pub fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
+    }
+}
+
 #[proc_macro_derive(Display, attributes(display))]
 pub fn display(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
@@ -38,7 +50,9 @@ fn impl_display(ast: &syn::DeriveInput) -> TokenStream {
     let generated = match &ast.data {
         Data::Union(union_data) => parse_union(union_data),
         Data::Enum(enum_data) => parse_enum(enum_data),
-        Data::Struct(struct_data) => parse_struct(struct_data),
+        Data::Struct(struct_data) => {
+            parse_struct(ident, &struct_data.fields, &ast.attrs, ast.span())
+        }
     };
 
     quote! {
@@ -134,8 +148,172 @@ fn parse_enum(enum_data: &DataEnum) -> TokenStream2 {
     }
 }
 
-fn parse_struct(_struct_data: &DataStruct) -> TokenStream2 {
-    quote! {}
+fn get_message_and_format_args(
+    struct_ident: &Ident,
+    fields: &Fields,
+    attrs: &[Attribute],
+    struct_span: Span,
+) -> Result<(String, Vec<String>), TokenStream2> {
+    let mut attr_span = struct_span;
+    let message = attrs
+        .iter()
+        .find(|attr| attr.path().is_ident("display"))
+        .and_then(|attr| {
+            attr_span = attr.span();
+            get_message_from_attribute(attr)
+        })
+        .unwrap_or_default();
+
+    let Ok(message_format_arguments) = parse_message(&message) else {
+        return Err(Error::new(
+            attr_span,
+            format!("The display message for {struct_ident} could not be parsed correctly. Make sure that all format arguments refering to attributes are valid rust attributes."),
+        ).to_compile_error());
+    };
+
+    format_arguments_are_valid_fields(
+        fields,
+        message_format_arguments
+            .iter()
+            .map(|str| str.as_str())
+            .collect::<Vec<_>>(),
+    )?;
+
+    Ok((message, message_format_arguments))
+}
+
+fn generate_write_call(
+    fields: &Fields,
+    message: String,
+    message_format_arguments: TokenStream2,
+) -> TokenStream2 {
+    match fields {
+        Fields::Unit => (),
+        Fields::Named(fields) => enforce_correct_display_use!(&fields.named),
+        Fields::Unnamed(fields) => enforce_correct_display_use!(&fields.unnamed),
+    };
+
+    quote! {
+        write!(f, #message, #message_format_arguments)
+    }
+}
+
+fn parse_struct(
+    struct_ident: &Ident,
+    fields: &Fields,
+    attrs: &[Attribute],
+    struct_span: Span,
+) -> TokenStream2 {
+    match get_message_and_format_args(struct_ident, fields, attrs, struct_span) {
+        Ok((mut message, mut message_format_arguments)) => {
+            if let Fields::Unnamed(_) = fields {
+                message = normalize_message_positional_format_args(
+                    message,
+                    &mut message_format_arguments,
+                );
+            }
+
+            let formatted_args = message_format_arguments
+                .iter()
+                .map(|argument| match fields {
+                    Fields::Named(_) => {
+                        let argument_ident = Ident::new(argument, proc_macro2::Span::call_site());
+                        quote! { #argument_ident = self.#argument_ident, }
+                    }
+                    Fields::Unnamed(_) => {
+                        let index: usize = argument.parse().expect(
+                            "Argument should be numeric since we are operating on unnamed fields.",
+                        );
+                        let index_literal = Index::from(index);
+                        quote! { self.#index_literal, }
+                    }
+                    _ => quote! {},
+                })
+                .collect();
+
+            println!("Arguments: {}", formatted_args);
+
+            generate_write_call(fields, message, formatted_args)
+        }
+        Err(error_message) => error_message,
+    }
+}
+
+/// normalizes the positional arguments in the message.
+/// We have to do this because let's say we have a tuple struct, that has 3 fields but the user
+/// only wants to use the second and the third argument in the display string like this:
+/// ```
+/// use proc_display::Display;
+///
+/// #[derive(Display)]
+/// #[display("I only want to display the third: {2} and the second: {1} number.")]
+/// struct TupleStruct(i32, i32, i32);
+///
+/// let my_struct = TupleStruct(42, 69, 21);
+/// assert_eq!(format!("{my_struct}"), "I only want to display the third: 21 and the second: 69 number.".to_string());
+/// ```
+/// if we were to not normalize the messages positional arguments the write! macro in the Display
+/// implementation would panick since it would expect 3 arguments in total, but only two will be
+/// given to it
+fn normalize_message_positional_format_args(
+    message: String,
+    message_format_arguments: &mut [String],
+) -> String {
+    let mut normalized_message = message;
+    message_format_arguments.sort();
+
+    for (i, arg) in message_format_arguments.iter().enumerate() {
+        normalized_message =
+            replace_positional_arguments(normalized_message, arg, i.to_string().as_str());
+    }
+
+    normalized_message
+}
+
+fn replace_positional_arguments(message: String, from: &str, to: &str) -> String {
+    if from.is_empty() {
+        return message;
+    };
+
+    let mut chars = message.chars().enumerate().peekable();
+    let mut argument_intervalls = vec![];
+
+    while let Some((pos, next_char)) = chars.next() {
+        if next_char == '{' {
+            if chars.peek().map(|(_, ch)| *ch) == Some('{') {
+                chars.next();
+                continue;
+            }
+
+            let start_pos = pos;
+            let mut captured = String::new();
+            let mut end_pos = start_pos;
+
+            for (pos, inner_char) in chars.by_ref() {
+                if inner_char == '}' {
+                    end_pos = pos;
+                    break;
+                }
+                captured.push(inner_char);
+            }
+
+            if captured == from {
+                argument_intervalls.push(Intervall::new(start_pos, end_pos));
+            }
+        }
+    }
+
+    let mut new_message = String::new();
+    let mut last_end = 0;
+    for intervall in argument_intervalls {
+        new_message.push_str(&message[last_end..intervall.start]);
+        new_message.push_str(&format!("{{{}}}", to));
+        last_end = intervall.end + 1;
+    }
+
+    new_message.push_str(&message[last_end..message.len()]);
+
+    new_message
 }
 
 fn format_arguments_are_valid_fields(
