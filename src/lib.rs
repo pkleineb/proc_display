@@ -178,7 +178,7 @@ fn get_message_and_format_args(
         Err(parse_error) => {
             return Err(Error::new(
                 attr_span,
-                format!("The display message for {struct_ident} could not be parsed correctly because there was a problem at character {} in the string. Make sure that all format arguments refering to attributes are valid rust attributes.", parse_error.pos),
+                format!("The display message for {struct_ident} could not be parsed correctly because there was a problem at character {} in the string.\nMake sure that all format arguments refering to attributes are valid rust attributes and the format specifier is valid.", parse_error.pos),
             ));
         }
     };
