@@ -500,4 +500,58 @@ mod tests {
         let str = "{\\}";
         assert_eq!(parse_message(str), Err(ParseError));
     }
+
+    #[test]
+    fn replace_positional_arguments_correctly_in_simple_str() {
+        let str = "{2}".to_string();
+        assert_eq!(
+            replace_positional_arguments(str, "2", "0"),
+            "{0}".to_string()
+        );
+    }
+
+    #[test]
+    fn replace_positional_arguments_correctly_in_complex_str() {
+        let str = "Normal text here {2} around this argument".to_string();
+        assert_eq!(
+            replace_positional_arguments(str, "2", "0"),
+            "Normal text here {0} around this argument".to_string()
+        );
+    }
+
+    #[test]
+    fn replace_positional_arguments_handle_escaped() {
+        let str = "{{2}}".to_string();
+        assert_eq!(
+            replace_positional_arguments(str, "2", "0"),
+            "{{2}}".to_string()
+        );
+    }
+
+    #[test]
+    fn replace_positional_arguments_replace_multiple_of_same_kind() {
+        let str = "{2} {2} {2}".to_string();
+        assert_eq!(
+            replace_positional_arguments(str, "2", "0"),
+            "{0} {0} {0}".to_string()
+        );
+    }
+
+    #[test]
+    fn replace_positional_arguments_replace_only_same_kind() {
+        let str = "{2} {1} {2}".to_string();
+        assert_eq!(
+            replace_positional_arguments(str, "2", "0"),
+            "{0} {1} {0}".to_string()
+        );
+    }
+
+    #[test]
+    fn replace_positional_arguments_ignores_normal_numbers() {
+        let str = "2 {2}".to_string();
+        assert_eq!(
+            replace_positional_arguments(str, "2", "0"),
+            "2 {0}".to_string()
+        );
+    }
 }
