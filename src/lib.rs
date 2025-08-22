@@ -56,7 +56,20 @@ fn impl_display(ast: &syn::DeriveInput) -> TokenStream {
     let ident = &ast.ident;
 
     let generated = match &ast.data {
-        Data::Union(union_data) => parse_union(union_data),
+        Data::Union(_) => {
+            let message = &ast
+                .attrs
+                .iter()
+                .find(|attr| attr.path().is_ident("display"))
+                .and_then(get_message_from_attribute)
+                .unwrap_or_default();
+
+            Ok(generate_write_call(
+                &Fields::Unit,
+                message.to_string(),
+                quote! {},
+            ))
+        }
         Data::Enum(enum_data) => parse_enum(enum_data),
         Data::Struct(struct_data) => {
             parse_struct(ident, &struct_data.fields, &ast.attrs, ast.span())
@@ -79,10 +92,6 @@ fn impl_display(ast: &syn::DeriveInput) -> TokenStream {
         }
         Err(error_token_stream) => error_token_stream.to_compile_error().into(),
     }
-}
-
-fn parse_union(_union_data: &DataUnion) -> Result<TokenStream2, Error> {
-    Ok(quote! {})
 }
 
 fn parse_enum(enum_data: &DataEnum) -> Result<TokenStream2, Error> {
