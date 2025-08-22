@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
-use quote::quote;
+use quote::{quote, TokenStreamExt};
 use syn::{
     parse_macro_input, spanned::Spanned, Attribute, Data, DataEnum, DataUnion, DeriveInput, Error,
     Fields, Ident, Index, LitStr, Meta,
@@ -55,97 +55,98 @@ fn impl_display(ast: &syn::DeriveInput) -> TokenStream {
         }
     };
 
-    quote! {
-        impl std::fmt::Display for #ident {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                #generated
+    match generated {
+        Ok(generated) => {
+            let result = quote! {
+                impl std::fmt::Display for #ident {
+                    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                        #generated
+                    }
+                }
+            };
+
+            println!("Generated Code: {}", result);
+
+            result.into()
+        }
+        Err(error_token_stream) => error_token_stream.to_compile_error().into(),
+    }
+}
+
+fn parse_union(_union_data: &DataUnion) -> Result<TokenStream2, Error> {
+    Ok(quote! {})
+}
+
+fn parse_enum(enum_data: &DataEnum) -> Result<TokenStream2, Error> {
+    let mut branches = quote! {};
+    for variant in &enum_data.variants {
+        let variant_ident = &variant.ident;
+
+        let (mut message, mut message_format_arguments) = get_message_and_format_args(
+            variant_ident,
+            &variant.fields,
+            &variant.attrs,
+            variant.span(),
+        )?;
+
+        if let Fields::Unnamed(_) = &variant.fields {
+            message =
+                normalize_message_positional_format_args(message, &mut message_format_arguments);
+        }
+
+        let mut formatted_args = quote! {};
+        let mut field_destructuring = quote! {};
+        for argument in message_format_arguments {
+            match &variant.fields {
+                Fields::Named(_) => {
+                    let argument_ident = Ident::new(&argument, proc_macro2::Span::call_site());
+                    field_destructuring.append_all(quote! { #argument_ident, });
+                }
+                Fields::Unnamed(_) => {
+                    let index: usize = argument.parse().expect(
+                        "Argument should be numeric since we are operating on unnamed fields.",
+                    );
+                    let argument_ident = Ident::new(
+                        &generate_unnamed_enum_positional_field_name(index),
+                        proc_macro2::Span::call_site(),
+                    );
+                    formatted_args.append_all(quote! { #argument_ident, });
+                    field_destructuring.append_all(quote! { #argument_ident, });
+                }
+                _ => (),
+            }
+        }
+
+        let write_call = generate_write_call(&variant.fields, message, formatted_args);
+
+        match &variant.fields {
+            Fields::Unit => {
+                branches.append_all(quote! {
+                    Self::#variant_ident => #write_call,
+                });
+            }
+            Fields::Named(_) => {
+                branches.append_all(quote! {
+                    Self::#variant_ident {#field_destructuring ..} => #write_call,
+                });
+            }
+            Fields::Unnamed(_) => {
+                branches.append_all(quote! {
+                    Self::#variant_ident (#field_destructuring ..) => #write_call,
+                });
             }
         }
     }
-    .into()
-}
 
-fn parse_union(_union_data: &DataUnion) -> TokenStream2 {
-    quote! {}
-}
-
-fn parse_enum(enum_data: &DataEnum) -> TokenStream2 {
-    let branches: TokenStream2 = enum_data
-        .variants
-        .iter()
-        .map(|variant| {
-            let variant_name = &variant.ident;
-            let mut attr_span = variant.span();
-            let message = variant
-                .attrs
-                .iter()
-                .find(|attr| attr.path().is_ident("display"))
-                .and_then(|attr| {
-                    attr_span = attr.span();
-                    get_message_from_attribute(attr)
-                })
-                .unwrap_or_default();
-
-            let Ok(message_format_arguments) = parse_message(&message) else {
-                return Error::new(
-                    attr_span,
-                    format!("The display message for {variant_name} could not be parsed correctly. Make sure that all format arguments refering to attributes are valid rust attributes."),
-                ).to_compile_error();
-            };
-
-            if let Err(error_message) = format_arguments_are_valid_fields(&variant.fields, message_format_arguments.iter().map(|str| str.as_str()).collect::<Vec<_>>()) {
-                return error_message;
-            }
-
-            match &variant.fields {
-                Fields::Unit => {
-                    quote! {
-                        Self::#variant_name => write!(f, "{}", #message),
-                    }
-                }
-                Fields::Named(fields) => {
-                    enforce_correct_display_use!(&fields.named);
-                    let write_call = parse_named_fields(message, message_format_arguments);
-                    let field_destructuring: TokenStream2 = fields
-                        .named
-                        .iter()
-                        .map(|field| {
-                            let field_ident = &field.ident;
-                            quote! { #field_ident, }
-                        })
-                        .collect();
-
-                    quote! {
-                        Self::#variant_name {#field_destructuring ..} => #write_call,
-                    }
-                }
-                Fields::Unnamed(fields) => {
-                    enforce_correct_display_use!(&fields.unnamed);
-                    let write_call = parse_unnamed_fields(message, message_format_arguments);
-                    let field_destructuring: TokenStream2 = fields
-                        .unnamed
-                        .iter()
-                        .enumerate()
-                        .map(|(i, _)| {
-                            let field_name = format!("field_{i}");
-                            let field_ident =
-                                Ident::new(&field_name, proc_macro2::Span::call_site());
-                            quote! { #field_ident, }
-                        })
-                        .collect();
-                    quote! {
-                        Self::#variant_name (#field_destructuring ..) => #write_call,
-                    }
-                }
-            }
-        })
-        .collect();
-
-    quote! {
+    Ok(quote! {
         match self {
             #branches
         }
-    }
+    })
+}
+
+fn generate_unnamed_enum_positional_field_name(index: usize) -> String {
+    format!("field_{index}")
 }
 
 fn get_message_and_format_args(
@@ -153,7 +154,7 @@ fn get_message_and_format_args(
     fields: &Fields,
     attrs: &[Attribute],
     struct_span: Span,
-) -> Result<(String, Vec<String>), TokenStream2> {
+) -> Result<(String, Vec<String>), Error> {
     let mut attr_span = struct_span;
     let message = attrs
         .iter()
@@ -168,7 +169,7 @@ fn get_message_and_format_args(
         return Err(Error::new(
             attr_span,
             format!("The display message for {struct_ident} could not be parsed correctly. Make sure that all format arguments refering to attributes are valid rust attributes."),
-        ).to_compile_error());
+        ));
     };
 
     format_arguments_are_valid_fields(
@@ -203,40 +204,33 @@ fn parse_struct(
     fields: &Fields,
     attrs: &[Attribute],
     struct_span: Span,
-) -> TokenStream2 {
-    match get_message_and_format_args(struct_ident, fields, attrs, struct_span) {
-        Ok((mut message, mut message_format_arguments)) => {
-            if let Fields::Unnamed(_) = fields {
-                message = normalize_message_positional_format_args(
-                    message,
-                    &mut message_format_arguments,
-                );
-            }
+) -> Result<TokenStream2, Error> {
+    let (mut message, mut message_format_arguments) =
+        get_message_and_format_args(struct_ident, fields, attrs, struct_span)?;
 
-            let formatted_args = message_format_arguments
-                .iter()
-                .map(|argument| match fields {
-                    Fields::Named(_) => {
-                        let argument_ident = Ident::new(argument, proc_macro2::Span::call_site());
-                        quote! { #argument_ident = self.#argument_ident, }
-                    }
-                    Fields::Unnamed(_) => {
-                        let index: usize = argument.parse().expect(
-                            "Argument should be numeric since we are operating on unnamed fields.",
-                        );
-                        let index_literal = Index::from(index);
-                        quote! { self.#index_literal, }
-                    }
-                    _ => quote! {},
-                })
-                .collect();
-
-            println!("Arguments: {}", formatted_args);
-
-            generate_write_call(fields, message, formatted_args)
-        }
-        Err(error_message) => error_message,
+    if let Fields::Unnamed(_) = fields {
+        message = normalize_message_positional_format_args(message, &mut message_format_arguments);
     }
+
+    let formatted_args = message_format_arguments
+        .iter()
+        .map(|argument| match fields {
+            Fields::Named(_) => {
+                let argument_ident = Ident::new(argument, proc_macro2::Span::call_site());
+                quote! { #argument_ident = self.#argument_ident, }
+            }
+            Fields::Unnamed(_) => {
+                let index: usize = argument
+                    .parse()
+                    .expect("Argument should be numeric since we are operating on unnamed fields.");
+                let index_literal = Index::from(index);
+                quote! { self.#index_literal, }
+            }
+            _ => quote! {},
+        })
+        .collect();
+
+    Ok(generate_write_call(fields, message, formatted_args))
 }
 
 /// normalizes the positional arguments in the message.
@@ -319,7 +313,7 @@ fn replace_positional_arguments(message: String, from: &str, to: &str) -> String
 fn format_arguments_are_valid_fields(
     fields: &Fields,
     mut format_arguments: Vec<&str>,
-) -> Result<(), TokenStream2> {
+) -> Result<(), Error> {
     match fields {
         Fields::Unit => {
             if !format_arguments.is_empty() {
@@ -327,7 +321,7 @@ fn format_arguments_are_valid_fields(
                     Error::new(
                         fields.span(),
                         "#[display(...)] doesn't expect any format argument variabels on a unit struct since there are no attributes."
-                    ).to_compile_error()
+                    )
                 );
             }
         }
@@ -351,8 +345,7 @@ fn format_arguments_are_valid_fields(
                         "#[display(...)] found undeclared fields ({}) in display message.",
                         format_arguments.join(", ")
                     ),
-                )
-                .to_compile_error());
+                ));
             }
         }
         Fields::Unnamed(unnamed_fields) => {
@@ -365,51 +358,13 @@ fn format_arguments_are_valid_fields(
                             format_arguments.len(),
                             unnamed_fields.unnamed.len()
                         )
-                    ).to_compile_error()
+                    )
                 );
             }
         }
     }
 
     Ok(())
-}
-
-fn parse_named_fields(message: String, format_arguments_to_use: Vec<String>) -> TokenStream2 {
-    let arguments: TokenStream2 = format_arguments_to_use
-        .iter()
-        .map(|field| {
-            let field_ident = Ident::new(field, proc_macro2::Span::call_site());
-            quote! { #field_ident = #field_ident, }
-        })
-        .collect();
-
-    quote! {
-        write!(f, #message, #arguments)
-    }
-}
-
-fn parse_unnamed_fields(
-    mut message: String,
-    mut format_arguments_to_use: Vec<String>,
-) -> TokenStream2 {
-    format_arguments_to_use.sort();
-
-    let arguments: TokenStream2 = format_arguments_to_use
-        .iter()
-        .map(|i| {
-            let field_name = format!("field_{i}");
-            let field_ident = Ident::new(&field_name, proc_macro2::Span::call_site());
-            quote! { #field_ident, }
-        })
-        .collect();
-
-    for (i, format_argument) in format_arguments_to_use.iter().enumerate() {
-        message = message.replace(format_argument, i.to_string().as_str());
-    }
-
-    quote! {
-        write!(f, #message, #arguments)
-    }
 }
 
 fn get_message_from_attribute(attr: &Attribute) -> Option<String> {
