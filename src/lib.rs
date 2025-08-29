@@ -22,17 +22,20 @@ macro_rules! enforce_correct_display_use {
     };
 }
 
+/// Error Struct indicating an error occured during parsing of a string and where that error is
 #[derive(Debug, PartialEq)]
 struct ParseError {
     pub pos: usize,
 }
 
 impl ParseError {
+    /// creates a new `ParseError` with a position on where the error is
     pub fn new(pos: usize) -> Self {
         Self { pos }
     }
 }
 
+/// Intervall between two indices
 #[derive(Debug)]
 struct Intervall {
     pub start: usize,
@@ -40,6 +43,7 @@ struct Intervall {
 }
 
 impl Intervall {
+    /// Creates a new intervall with a start and end index
     pub fn new(start: usize, end: usize) -> Self {
         Self { start, end }
     }
@@ -52,6 +56,7 @@ pub fn display(input: TokenStream) -> TokenStream {
     impl_display(&ast)
 }
 
+/// macro implementation handling all DataTypes the derive macro can be used on
 fn impl_display(ast: &syn::DeriveInput) -> TokenStream {
     let ident = &ast.ident;
 
@@ -80,6 +85,7 @@ fn impl_display(ast: &syn::DeriveInput) -> TokenStream {
     }
 }
 
+/// parses an enum into a `TokenStream` implementing the Display trait for all enum variants
 fn parse_enum(enum_data: &DataEnum, default: String) -> Result<TokenStream2, Error> {
     let mut branches = quote! {};
     for variant in &enum_data.variants {
@@ -146,10 +152,14 @@ fn parse_enum(enum_data: &DataEnum, default: String) -> Result<TokenStream2, Err
     })
 }
 
+/// utilty function to pin how the unnamed enum positional fields should be named when
+/// destructuring or refering to them in the display string
 fn generate_unnamed_enum_positional_field_name(index: usize) -> String {
     format!("field_{index}")
 }
 
+/// Tries to retrieve the message from a list of attributes by checking wether or not there is
+/// an attribute with the name "display"
 fn get_message_from_attrs(attrs: &[Attribute], span: Span, default: &str) -> (String, Span) {
     let mut attr_span = span;
     let message = attrs
@@ -164,6 +174,8 @@ fn get_message_from_attrs(attrs: &[Attribute], span: Span, default: &str) -> (St
     (message, attr_span)
 }
 
+/// Parses the formatarguments from the given message. Since the fromatarguments may not be
+/// formatted correctly this might throw an error
 fn get_format_args(
     message: &str,
     struct_ident: &Ident,
@@ -191,6 +203,7 @@ fn get_format_args(
     Ok(message_format_arguments)
 }
 
+/// creates the write call based on what type of struct we are encountering
 fn generate_write_call(
     fields: &Fields,
     message: String,
@@ -207,6 +220,7 @@ fn generate_write_call(
     }
 }
 
+/// parses a struct into a `TokenStream` implementing the Display trait
 fn parse_struct(
     mut message: String,
     struct_ident: &Ident,
@@ -265,13 +279,15 @@ fn normalize_message_positional_format_args(
 
     for (i, arg) in message_format_arguments.iter().enumerate() {
         normalized_message =
-            replace_positional_arguments(normalized_message, arg, i.to_string().as_str());
+            replace_format_argument(normalized_message, arg, i.to_string().as_str());
     }
 
     normalized_message
 }
 
-fn replace_positional_arguments(message: String, from: &str, to: &str) -> String {
+/// replaces the formatargument `from` to the formatargument `to` in the given string and returns
+/// the replaced string
+fn replace_format_argument(message: String, from: &str, to: &str) -> String {
     if from.is_empty() {
         return message;
     };
@@ -317,6 +333,7 @@ fn replace_positional_arguments(message: String, from: &str, to: &str) -> String
     new_message
 }
 
+/// checks wether or not all format arguments exist on the struct.
 fn format_arguments_are_valid_fields(
     fields: &Fields,
     mut format_arguments: Vec<&str>,
@@ -374,6 +391,8 @@ fn format_arguments_are_valid_fields(
     Ok(())
 }
 
+/// tries to get the message from a given attribute. If the attribute does not have a String
+/// argument this will return None
 fn get_message_from_attribute(attr: &Attribute) -> Option<String> {
     if let Meta::List(meta_list) = &attr.meta {
         if let Ok(message) = meta_list.parse_args::<LitStr>() {
@@ -384,6 +403,7 @@ fn get_message_from_attribute(attr: &Attribute) -> Option<String> {
     None
 }
 
+/// Tries to parse the message grabbing all format arguments and returning those
 fn parse_message(message: &str) -> Result<Vec<String>, ParseError> {
     let mut chars = message.chars().enumerate().peekable();
     let mut result = vec![];
@@ -442,6 +462,8 @@ fn parse_message(message: &str) -> Result<Vec<String>, ParseError> {
     Ok(result)
 }
 
+/// checks wether or not a specifier is a valid rust format specifier as declared in the [fmt
+/// definition](https://doc.rust-lang.org/std/fmt/index.html)
 fn is_valid_format_specifier(specifier: String) -> Result<(), ParseError> {
     if specifier.is_empty() {
         return Ok(());
@@ -560,56 +582,47 @@ mod tests {
     }
 
     #[test]
-    fn replace_positional_arguments_correctly_in_simple_str() {
+    fn replace_format_argument_correctly_in_simple_str() {
         let str = "{2}".to_string();
-        assert_eq!(
-            replace_positional_arguments(str, "2", "0"),
-            "{0}".to_string()
-        );
+        assert_eq!(replace_format_argument(str, "2", "0"), "{0}".to_string());
     }
 
     #[test]
-    fn replace_positional_arguments_correctly_in_complex_str() {
+    fn replace_format_argument_correctly_in_complex_str() {
         let str = "Normal text here {2} around this argument".to_string();
         assert_eq!(
-            replace_positional_arguments(str, "2", "0"),
+            replace_format_argument(str, "2", "0"),
             "Normal text here {0} around this argument".to_string()
         );
     }
 
     #[test]
-    fn replace_positional_arguments_handle_escaped() {
+    fn replace_format_argument_handle_escaped() {
         let str = "{{2}}".to_string();
-        assert_eq!(
-            replace_positional_arguments(str, "2", "0"),
-            "{{2}}".to_string()
-        );
+        assert_eq!(replace_format_argument(str, "2", "0"), "{{2}}".to_string());
     }
 
     #[test]
-    fn replace_positional_arguments_replace_multiple_of_same_kind() {
+    fn replace_format_argument_replace_multiple_of_same_kind() {
         let str = "{2} {2} {2}".to_string();
         assert_eq!(
-            replace_positional_arguments(str, "2", "0"),
+            replace_format_argument(str, "2", "0"),
             "{0} {0} {0}".to_string()
         );
     }
 
     #[test]
-    fn replace_positional_arguments_replace_only_same_kind() {
+    fn replace_format_argument_replace_only_same_kind() {
         let str = "{2} {1} {2}".to_string();
         assert_eq!(
-            replace_positional_arguments(str, "2", "0"),
+            replace_format_argument(str, "2", "0"),
             "{0} {1} {0}".to_string()
         );
     }
 
     #[test]
-    fn replace_positional_arguments_ignores_normal_numbers() {
+    fn replace_format_argument_ignores_normal_numbers() {
         let str = "2 {2}".to_string();
-        assert_eq!(
-            replace_positional_arguments(str, "2", "0"),
-            "2 {0}".to_string()
-        );
+        assert_eq!(replace_format_argument(str, "2", "0"), "2 {0}".to_string());
     }
 }
