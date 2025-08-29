@@ -55,25 +55,16 @@ pub fn display(input: TokenStream) -> TokenStream {
 fn impl_display(ast: &syn::DeriveInput) -> TokenStream {
     let ident = &ast.ident;
 
-    let generated = match &ast.data {
-        Data::Union(_) => {
-            let message = &ast
-                .attrs
-                .iter()
-                .find(|attr| attr.path().is_ident("display"))
-                .and_then(get_message_from_attribute)
-                .unwrap_or_default();
+    let (message, attr_span) = get_message_from_attrs(&ast.attrs, ast.span(), "");
 
-            Ok(generate_write_call(
-                &Fields::Unit,
-                message.to_string(),
-                quote! {},
-            ))
-        }
-        Data::Enum(enum_data) => parse_enum(enum_data),
-        Data::Struct(struct_data) => {
-            parse_struct(ident, &struct_data.fields, &ast.attrs, ast.span())
-        }
+    let generated = match &ast.data {
+        Data::Union(_) => Ok(generate_write_call(
+            &Fields::Unit,
+            message.to_string(),
+            quote! {},
+        )),
+        Data::Enum(enum_data) => parse_enum(enum_data, message),
+        Data::Struct(struct_data) => parse_struct(message, ident, &struct_data.fields, attr_span),
     };
 
     match generated {
@@ -89,17 +80,15 @@ fn impl_display(ast: &syn::DeriveInput) -> TokenStream {
     }
 }
 
-fn parse_enum(enum_data: &DataEnum) -> Result<TokenStream2, Error> {
+fn parse_enum(enum_data: &DataEnum, default: String) -> Result<TokenStream2, Error> {
     let mut branches = quote! {};
     for variant in &enum_data.variants {
         let variant_ident = &variant.ident;
 
-        let (mut message, mut message_format_arguments) = get_message_and_format_args(
-            variant_ident,
-            &variant.fields,
-            &variant.attrs,
-            variant.span(),
-        )?;
+        let (mut message, attr_span) =
+            get_message_from_attrs(&variant.attrs, variant.span(), &default);
+        let mut message_format_arguments =
+            get_format_args(&message, variant_ident, &variant.fields, attr_span)?;
 
         if let Fields::Unnamed(_) = &variant.fields {
             message =
@@ -161,13 +150,8 @@ fn generate_unnamed_enum_positional_field_name(index: usize) -> String {
     format!("field_{index}")
 }
 
-fn get_message_and_format_args(
-    struct_ident: &Ident,
-    fields: &Fields,
-    attrs: &[Attribute],
-    struct_span: Span,
-) -> Result<(String, Vec<String>), Error> {
-    let mut attr_span = struct_span;
+fn get_message_from_attrs(attrs: &[Attribute], span: Span, default: &str) -> (String, Span) {
+    let mut attr_span = span;
     let message = attrs
         .iter()
         .find(|attr| attr.path().is_ident("display"))
@@ -175,9 +159,18 @@ fn get_message_and_format_args(
             attr_span = attr.span();
             get_message_from_attribute(attr)
         })
-        .unwrap_or_default();
+        .unwrap_or(default.to_string());
 
-    let message_format_arguments = match parse_message(&message) {
+    (message, attr_span)
+}
+
+fn get_format_args(
+    message: &str,
+    struct_ident: &Ident,
+    fields: &Fields,
+    attr_span: Span,
+) -> Result<Vec<String>, Error> {
+    let message_format_arguments = match parse_message(message) {
         Ok(args) => args,
         Err(parse_error) => {
             return Err(Error::new(
@@ -195,7 +188,7 @@ fn get_message_and_format_args(
             .collect::<Vec<_>>(),
     )?;
 
-    Ok((message, message_format_arguments))
+    Ok(message_format_arguments)
 }
 
 fn generate_write_call(
@@ -215,13 +208,12 @@ fn generate_write_call(
 }
 
 fn parse_struct(
+    mut message: String,
     struct_ident: &Ident,
     fields: &Fields,
-    attrs: &[Attribute],
-    struct_span: Span,
+    attr_span: Span,
 ) -> Result<TokenStream2, Error> {
-    let (mut message, mut message_format_arguments) =
-        get_message_and_format_args(struct_ident, fields, attrs, struct_span)?;
+    let mut message_format_arguments = get_format_args(&message, struct_ident, fields, attr_span)?;
 
     if let Fields::Unnamed(_) = fields {
         message = normalize_message_positional_format_args(message, &mut message_format_arguments);
@@ -558,13 +550,13 @@ mod tests {
     #[test]
     fn invalid_argument_message_parse() {
         let str = "{{}";
-        assert_eq!(parse_message(str), Err(ParseError));
+        assert_eq!(parse_message(str), Err(ParseError::new(2)));
         let str = "{}}";
-        assert_eq!(parse_message(str), Err(ParseError));
+        assert_eq!(parse_message(str), Err(ParseError::new(1)));
         let str = "{-}";
-        assert_eq!(parse_message(str), Err(ParseError));
+        assert_eq!(parse_message(str), Err(ParseError::new(1)));
         let str = "{\\}";
-        assert_eq!(parse_message(str), Err(ParseError));
+        assert_eq!(parse_message(str), Err(ParseError::new(1)));
     }
 
     #[test]
