@@ -1,5 +1,7 @@
 use proc_macro2::Span;
-use syn::{spanned::Spanned, Attribute, Error, Fields, Ident, LitStr, Meta};
+use syn::{
+    spanned::Spanned, Attribute, Error, Fields, FieldsNamed, FieldsUnnamed, Ident, LitStr, Meta,
+};
 
 /// Error Struct indicating an error occured during parsing of a string and where that error is
 #[derive(Debug, PartialEq)]
@@ -62,56 +64,80 @@ pub fn get_format_args(
 /// checks wether or not all format arguments exist on the struct.
 fn format_arguments_are_valid_fields(
     fields: &Fields,
-    mut format_arguments: Vec<&str>,
+    format_arguments: Vec<&str>,
 ) -> Result<(), Error> {
     match fields {
-        Fields::Unit => {
-            if !format_arguments.is_empty() {
-                return Err(
-                    Error::new(
-                        fields.span(),
-                        "#[display(...)] doesn't expect any format argument variabels on a unit struct since there are no attributes."
-                    )
-                );
-            }
-        }
-        Fields::Named(named_fields) => {
-            for field in &named_fields.named {
-                if let Some(position) = format_arguments.iter().position(|format_argument| {
-                    let field_ident = &field
-                        .ident
-                        .as_ref()
-                        .expect("Expected field to be named when iterating over named fields.");
-                    *format_argument == field_ident.to_string().as_str()
-                }) {
-                    format_arguments.remove(position);
-                }
-            }
-
-            if !format_arguments.is_empty() {
-                return Err(Error::new(
-                    fields.span(),
-                    format!(
-                        "#[display(...)] found undeclared fields ({}) in display message.",
-                        format_arguments.join(", ")
-                    ),
-                ));
-            }
-        }
+        Fields::Unit => handle_unit_fields(fields, format_arguments),
+        Fields::Named(named_fields) => handle_named_fields(fields, named_fields, format_arguments),
         Fields::Unnamed(unnamed_fields) => {
-            if unnamed_fields.unnamed.len() < format_arguments.len() {
-                return Err(
-                    Error::new(
-                        fields.span(),
-                        format!(
-                            "#[display(...)] expected {} positional arguments, but only {} are defined on the Tuple struct",
-                            format_arguments.len(),
-                            unnamed_fields.unnamed.len()
-                        )
-                    )
-                );
-            }
+            handle_unnamed_fields(fields, unnamed_fields, format_arguments)
         }
+    }
+}
+
+fn handle_unit_fields(fields: &Fields, format_arguments: Vec<&str>) -> Result<(), Error> {
+    if format_arguments.is_empty() {
+        return Ok(());
+    }
+
+    Err(
+        Error::new(
+            fields.span(),
+            "#[display(...)] doesn't expect any format argument variabels on a unit struct since there are no attributes."
+        )
+    )
+}
+
+fn handle_named_fields(
+    fields: &Fields,
+    named_fields: &FieldsNamed,
+    mut format_arguments: Vec<&str>,
+) -> Result<(), Error> {
+    for field in &named_fields.named {
+        if let Some(position) = format_arguments.iter().position(|format_argument| {
+            let field_ident = &field
+                .ident
+                .as_ref()
+                .expect("Expected field to be named when iterating over named fields.");
+            *format_argument == field_ident.to_string().as_str()
+        }) {
+            format_arguments.remove(position);
+        }
+    }
+
+    if format_arguments.is_empty() {
+        return Ok(());
+    }
+
+    Err(Error::new(
+        fields.span(),
+        format!(
+            "#[display(...)] found undeclared fields ({}) in display message.",
+            format_arguments.join(", ")
+        ),
+    ))
+}
+
+fn is_reserved_keyword(word: &str) -> bool {
+    RESERVED_KEYWORDS.contains(&word)
+}
+
+fn handle_unnamed_fields(
+    fields: &Fields,
+    unnamed_fields: &FieldsUnnamed,
+    format_arguments: Vec<&str>,
+) -> Result<(), Error> {
+    if unnamed_fields.unnamed.len() < format_arguments.len() {
+        return Err(
+            Error::new(
+                fields.span(),
+                format!(
+                    "#[display(...)] expected {} positional arguments, but only {} are defined on the Tuple struct",
+                    format_arguments.len(),
+                    unnamed_fields.unnamed.len()
+                )
+            )
+        );
     }
 
     Ok(())
