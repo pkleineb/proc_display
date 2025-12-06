@@ -146,10 +146,10 @@ fn handle_unnamed_fields(
 /// tries to get the message from a given attribute. If the attribute does not have a String
 /// argument this will return None
 fn get_message_from_attribute(attr: &Attribute) -> Option<String> {
-    if let Meta::List(meta_list) = &attr.meta {
-        if let Ok(message) = meta_list.parse_args::<LitStr>() {
-            return Some(message.value());
-        }
+    if let Meta::List(meta_list) = &attr.meta
+        && let Ok(message) = meta_list.parse_args::<LitStr>()
+    {
+        return Some(message.value());
     }
 
     None
@@ -236,10 +236,10 @@ fn is_valid_format_specifier(specifier: String) -> Result<(), ParseError> {
         }
     }
 
-    if let Some(&(_, ch)) = chars.peek() {
-        if matches!(ch, '+' | '-') {
-            chars.next();
-        }
+    if let Some(&(_, ch)) = chars.peek()
+        && matches!(ch, '+' | '-')
+    {
+        chars.next();
     }
 
     if chars.peek().map(|(_, ch)| *ch) == Some('#') {
