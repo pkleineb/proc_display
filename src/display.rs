@@ -23,9 +23,36 @@ macro_rules! enforce_correct_display_use {
     };
 }
 
+/// Array for reserved keywords that get replaced with general information of the annotated type.
+/// keywords can be used like this:
+/// ```compile_fail
+/// use proc_display::Display;
+///
+/// #[derive(Display)]
+/// #[display("I am {self.<keyword>}")]
+/// struct MyStruct {}
+/// ```
+///
+/// Keywords are:
+///  - "name" which gets replaced with the types ident. If this is declared on enum variants it
+///    will be the enum variants ident.
+///    ```
+///    use proc_display::Display;
+///
+///    #[derive(Display)]
+///    enum MyEnum{
+///        #[display("I am {self.name}")]
+///        AType
+///    }
+///
+///    assert_eq!(format!("{}", MyEnum::AType), "I am AType");
+///    ```
+///
 pub const RESERVED_KEYWORDS: [&str; 1] = ["name"];
 
+/// trait that helps us implemnt reserved keywords generically
 trait ReplacementProvider {
+    /// returns the ident of the type
     fn get_ident(&self) -> &Ident;
 }
 
@@ -187,6 +214,7 @@ fn generate_unnamed_enum_positional_field_name(index: usize) -> String {
     format!("field_{index}")
 }
 
+/// replaces reserved keywords, that are prefixed with `self` to concrete strings
 fn replace_reserved_keywords(mut message: String, provider: &impl ReplacementProvider) -> String {
     for keyword in RESERVED_KEYWORDS {
         let pattern = format!("{{self.{keyword}}}");

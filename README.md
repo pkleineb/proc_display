@@ -81,3 +81,11 @@ union Union {
     field: i32,
 }
 ```
+
+## Reserved Keywords
+On any type you may use `{self.<keyword>}` to get general data about a type.
+
+### Available Keywords:
+| Keyword |  Resolved data  |
+|---------|-----------------|
+|  name   | The types ident |

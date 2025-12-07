@@ -30,7 +30,7 @@ mod validator;
 /// use proc_display::Display;
 ///
 /// #[derive(Display)]
-/// #[display("I am a Named struct: {field} {number}.")]
+/// #[display("I am a Named struct called {self.name}: {field} {number}.")]
 /// struct Named {
 ///     field: String,
 ///     number: i32,
