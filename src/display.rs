@@ -218,3 +218,67 @@ fn generate_write_call(
         write!(f, #message, #message_format_arguments)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use syn::{parse_quote, DeriveInput};
+
+    use super::*;
+
+    #[test]
+    fn valid_replace_reserved_keywords_variant() {
+        let str = "I am {self.name}".to_string();
+        let variant: Variant = parse_quote! {
+            Variant
+        };
+
+        let result = replace_reserved_keywords(str, &variant);
+        assert_eq!(result, "I am Variant");
+    }
+
+    #[test]
+    fn valid_replace_reserved_keywords_struct() {
+        let str = "I am {self.name}".to_string();
+        let variant: DeriveInput = parse_quote! {
+            struct Struct {}
+        };
+
+        let result = replace_reserved_keywords(str, &variant);
+        assert_eq!(result, "I am Struct");
+    }
+
+    #[test]
+    fn valid_replace_reserved_keywords_union() {
+        let str = "I am {self.name}".to_string();
+        let variant: DeriveInput = parse_quote! {
+            union Union {
+                field: i32
+            }
+        };
+
+        let result = replace_reserved_keywords(str, &variant);
+        assert_eq!(result, "I am Union");
+    }
+
+    #[test]
+    fn invalid_replace_reserved_keywords() {
+        let str = "I am {Self.name}".to_string();
+        let variant: Variant = parse_quote! {
+            Variant
+        };
+
+        let result = replace_reserved_keywords(str.clone(), &variant);
+        assert_eq!(result, str);
+    }
+
+    #[test]
+    fn unrecognized_reserved_keyword_gets_ignored() {
+        let str = "I am {self.eiotuewoitewituerpoitu}".to_string();
+        let variant: Variant = parse_quote! {
+            Variant
+        };
+
+        let result = replace_reserved_keywords(str.clone(), &variant);
+        assert_eq!(result, str);
+    }
+}

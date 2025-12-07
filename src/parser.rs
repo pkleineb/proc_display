@@ -118,10 +118,6 @@ fn handle_named_fields(
     ))
 }
 
-fn is_reserved_keyword(word: &str) -> bool {
-    RESERVED_KEYWORDS.contains(&word)
-}
-
 fn handle_unnamed_fields(
     fields: &Fields,
     unnamed_fields: &FieldsUnnamed,
