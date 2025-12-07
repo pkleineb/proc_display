@@ -70,6 +70,8 @@ mod validator;
 ///
 /// ## Unions (who uses this?)
 /// ```rust
+/// use proc_display::Display;
+///
 /// #[derive(Display)]
 /// #[display("Fields are not supported since they are unsafe")]
 /// union Union {
