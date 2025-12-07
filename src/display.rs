@@ -4,6 +4,7 @@ use crate::validator;
 use proc_macro::TokenStream;
 use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{quote, TokenStreamExt};
+use syn::Variant;
 use syn::{spanned::Spanned, Data, DataEnum, Error, Fields, Ident, Index};
 
 macro_rules! enforce_correct_display_use {
@@ -22,11 +23,30 @@ macro_rules! enforce_correct_display_use {
     };
 }
 
+pub const RESERVED_KEYWORDS: [&str; 1] = ["name"];
+
+trait ReplacementProvider {
+    fn get_ident(&self) -> &Ident;
+}
+
+impl ReplacementProvider for Variant {
+    fn get_ident(&self) -> &Ident {
+        &self.ident
+    }
+}
+
+impl ReplacementProvider for syn::DeriveInput {
+    fn get_ident(&self) -> &Ident {
+        &self.ident
+    }
+}
+
 /// macro implementation handling all DataTypes the derive macro can be used on
 pub fn impl_display(ast: &syn::DeriveInput) -> TokenStream {
     let ident = &ast.ident;
 
-    let (message, attr_span) = parser::get_message_from_attrs(&ast.attrs, ast.span(), "");
+    let (mut message, attr_span) = parser::get_message_from_attrs(&ast.attrs, ast.span(), "");
+    message = replace_reserved_keywords(message, ast);
 
     let generated = match &ast.data {
         Data::Union(_) => Ok(generate_write_call(
@@ -59,6 +79,9 @@ fn parse_enum(enum_data: &DataEnum, default: String) -> Result<TokenStream2, Err
 
         let (mut message, attr_span) =
             parser::get_message_from_attrs(&variant.attrs, variant.span(), &default);
+
+        message = replace_reserved_keywords(message, variant);
+
         let mut message_format_arguments =
             parser::get_format_args(&message, variant_ident, &variant.fields, attr_span)?;
 
@@ -162,6 +185,21 @@ fn parse_struct(
 /// destructuring or refering to them in the display string
 fn generate_unnamed_enum_positional_field_name(index: usize) -> String {
     format!("field_{index}")
+}
+
+fn replace_reserved_keywords(mut message: String, provider: &impl ReplacementProvider) -> String {
+    for keyword in RESERVED_KEYWORDS {
+        let pattern = format!("{{self.{keyword}}}");
+
+        let replacement = match keyword {
+            "name" | "variant" => provider.get_ident().to_string(),
+            _ => continue, // nothing to replace
+        };
+
+        message = message.replace(&pattern, &replacement);
+    }
+
+    message
 }
 
 /// creates the write call based on what type of struct we are encountering
